@@ -1,0 +1,798 @@
+---
+title: "生物医疗大作业2"
+author: "王英璇"
+date: "2023-05-21"
+output: html_document
+---
+
+```{r}
+## 定义数据生成函数
+# data_generate函数的输入为M, pi00,pi01,pi10,pi11, alpha1,alpha2，输出为P1,P2, Z00,Z01,Z10,Z11
+data_generate1 <- function(M,pi00,pi01,pi10,pi11,alpha1,alpha2){
+  P1 <- numeric(M)
+  P2 <- numeric(M)
+  Z00 <- numeric(M)
+  Z01 <- numeric(M)
+  Z10 <- numeric(M)
+  Z11 <- numeric(M)
+  C <- c(1:M)
+  index00 <- sample(C,M*pi00)
+  C1 <- C[-index00]
+  index01 <- sample(C1,M*pi01)
+  real_index01 <-c()
+  k=1
+  for (i in index01){
+    real_index01[k]=which(C1==i)
+    k=k+1
+  }
+  C2 <- C1[-real_index01]
+  index10 <- sample(C2,M*pi10)
+  real_index10 <-c()
+  k=1
+  for (i in index10){
+    real_index10[k]=which(C2==i)
+    k=k+1
+  }
+  C3 <- C2[-real_index10]
+  index11 <- sample(C3,M*pi11)
+  Z00[index00] <- 1
+  Z00[-index00] <- 0
+  Z01[index01] <- 1
+  Z01[-index01] <- 0
+  Z10[index10] <- 1
+  Z10[-index10] <- 0
+  Z11[index11] <- 1
+  Z11[-index11] <- 0
+  P1[index00] <- runif(M*pi00)
+  P1[index01] <- runif(M*pi01)
+  P1[index10] <- rbeta(M*pi10,alpha1,1)
+  P1[index11] <- rbeta(M*pi11,alpha1,1)
+  P2[index00] <- runif(M*pi00)
+  P2[index01] <- rbeta(M*pi01,alpha2,1)
+  P2[index10] <- runif(M*pi10)
+  P2[index11] <- rbeta(M*pi11,alpha2,1)
+  return(list(P1=P1,P2=P2,Z00=Z00,Z01=Z01,Z10=Z10,Z11=Z11))
+}
+```
+
+```{r}
+## 定义计算对数似然的函数
+# 对数似然函数log_P的输入为P和参数pi1，alpha
+log_p1 <- function(P1,P2,pi00,pi01,pi10,pi11,alpha1,alpha2){
+  return(sum(log(pi00+pi01*alpha2*P2^(alpha2-1)+pi10*alpha1*P1^(alpha1-1)+pi11*alpha1*alpha2*P2^(alpha2-1)*P1^(alpha1-1))))
+}
+```
+
+```{r}
+## 迭代
+# 设置最大迭代次数max_iter=10000
+## 每一次迭代中进行E步、M步、计算对数似然、判断算法是否收敛
+EM1 <- function(P1,P2,pi00_ini, pi01_ini,pi10_ini,pi11_ini,alpha1_ini,alpha2_ini, max_iter=1000){
+  L_ini <- log_p1(P1,P2,pi00_ini, pi01_ini,pi10_ini,pi11_ini,alpha1_ini,alpha2_ini)
+  for (iter in 1:max_iter){
+  if(iter==1){
+    pi00_old <- pi00_ini
+    pi01_old <- pi01_ini
+    pi10_old <- pi10_ini
+    pi11_old <- pi11_ini
+    alpha1_old <- alpha1_ini
+    alpha2_old <- alpha2_ini
+    L_old <- L_ini
+  }
+  ## E步
+  gamma <- pi00_old+pi01_old*alpha2_old*P2^(alpha2_old-1)+alpha1_old*P1^(alpha1_old-1)*pi10_old+pi11_old*alpha1_old*alpha2_old*P1^(alpha1_old-1)*P2^(alpha2_old-1)
+  gamma_z00 <- pi00_old/gamma
+  gamma_z01 <- pi01_old*alpha2_old*P2^(alpha2_old-1)/gamma
+  gamma_z10 <- pi10_old*alpha1_old*P1^(alpha1_old-1)/gamma
+  gamma_z11 <- pi11_old*alpha1_old*alpha2_old*P1^(alpha1_old-1)*P2^(alpha2_old-1)/gamma
+  ## M步
+  pi00_new <- mean(gamma_z00)
+  pi01_new <- mean(gamma_z01)
+  pi10_new <- mean(gamma_z10)
+  pi11_new <- mean(gamma_z11)
+  alpha1_new <- -sum(gamma_z11+gamma_z10)/sum(gamma_z11*log(P1)+gamma_z10*log(P1))
+  alpha2_new <- -sum(gamma_z11+gamma_z01)/sum(gamma_z11*log(P2)+gamma_z01*log(P2))
+  ## 计算对数似然 
+  L_new <- log_p1(P1,P2,pi00_new,pi01_new,pi10_new,pi11_new,alpha1_new,alpha2_new)
+  ## 判断算法是否收敛
+  if(L_new<L_old){
+    print("Error: log likelihood is not increasing!")
+    break
+  }
+  if((L_new-L_old)/abs(L_new)<1e-5){
+    pi00_est <- pi00_new
+    pi01_est <- pi01_new
+    pi10_est <- pi10_new
+    pi11_est <- pi11_new
+    alpha1_est <- alpha1_new
+    alpha2_est <- alpha2_new
+    break
+  }else{
+    pi00_old <- pi00_new
+    pi01_old <- pi01_new
+    pi10_old <- pi10_new
+    pi11_old <- pi11_new
+    alpha1_old <- alpha1_new
+    alpha2_old <- alpha2_new
+    L_old <- L_new
+  }
+  }
+  return(list(pi00 = pi00_new, pi01 = pi01_new, pi10 = pi10_new, pi11 = pi11_new ,alpha1 = alpha1_new, alpha2 = alpha2_new))
+}
+```
+
+```{r}
+# 设置随机种子
+set.seed(1)
+# 生成模拟数据
+M <- 100000
+data <- data_generate1(M,0.7,0.1,0.15,0.05,0.2,0.2)
+# 使用EM算法得到参数估计，检查与之前的结果是否一致
+theta_est <- EM1(data$P1,data$P2,pi00_ini=0.6,pi01_ini=0.05,pi10_ini=0.15,pi11_ini=0.01,alpha1_ini=0.2,alpha2_ini=0.1)
+print(theta_est)
+```
+```{r}
+#计算后验概率
+gamma_post <- theta_est$pi00+theta_est$pi01*theta_est$alpha2*data$P2^(theta_est$alpha2-1)+theta_est$alpha1*data$P1^(theta_est$alpha1-1)*theta_est$pi10+theta_est$pi11*theta_est$alpha1*theta_est$alpha2*data$P1^(theta_est$alpha1-1)*data$P2^(theta_est$alpha2-1)
+z11_post <- theta_est$pi11*theta_est$alpha1*theta_est$alpha2*data$P1^(theta_est$alpha1-1)*data$P2^(theta_est$alpha2-1)/gamma_post
+z01_post <- theta_est$pi01*theta_est$alpha2*data$P2^(theta_est$alpha2-1)/gamma_post
+z10_post <- theta_est$alpha1*data$P1^(theta_est$alpha1-1)*theta_est$pi10/gamma_post
+z00_post <- theta_est$pi00/gamma_post
+z1_post <- z11_post+z10_post
+z2_post <- z11_post+z01_post
+```
+
+
+```{r}
+# 给定控制FDR的水平alpha，可使用assoc函数基于潜变量的后验概率识别出与疾病有关的SNP
+# 函数的输入为posterior和alpha。
+# posterior为一个M维的向量，其中每个元素代表第i个SNP对应的潜变量z_i=1的后验概率posterior
+# alpha为控制FDR的水平
+# 函数的输出为Z_est，是一个M维的向量，其中每个元素代表第i个SNP是否被识别为与当前疾病相关，1代表有关，0代表无关
+assoc <- function(posterior, alpha){
+  M          <- length(posterior)
+  fdr        <- 1 - posterior
+  rank.fdr   <- rank(fdr)
+  sort.fdr   <- sort(fdr)
+  cumsum.fdr <- cumsum(sort.fdr)
+  sort.FDR   <- cumsum.fdr/seq(1, M, 1)
+  FDR        <- sort.FDR[rank.fdr]
+  
+  Z_est <- rep(0, M)
+  Z_est[which(FDR <= alpha)] <- 1
+  
+  return(Z_est)
+}
+
+## 使用assoc函数，针对模拟数据，识别出与疾病有关的SNP（控制FDR在水平0.1）
+# 即输入基于参数的EM估计计算得到的z=1的后验概率(posterior)，使用assoc函数得到Z_est
+
+Z_est_11 <- assoc(z11_post, 0.1)
+sum(Z_est_11)
+
+## 计算FDP和power
+# 比较真实的Z与上一步得到的Z_est，即用table(Z_est, Z)
+# V为表格中(Z_est=1, Z=0)的个数，S为(Z_est=1, Z=1)的个数，R为(Z_est=1)的个数，M0为(Z=0)的个数，M-M0为(Z=1)的个数
+# 使用V/R计算FDP，S/(M-M0)计算power
+# FDP应在0.1附近，否则说明代码有问题
+
+t<-table(Z_est_11, data$Z11)
+t
+
+FDP <- t[2, 1]/(t[2, 1] + t[2, 2])
+FDP
+
+power<-t[2,2]/(t[1,2]+t[2,2])
+power
+```
+```{r}
+#与疾病1有关
+Z_est_1 <- assoc(z1_post, 0.1)
+sum(Z_est_1)
+
+t<-table(Z_est_1, data$Z11+data$Z10)
+t
+
+FDP <- t[2, 1]/(t[2, 1] + t[2, 2])
+FDP
+
+power<-t[2,2]/(t[1,2]+t[2,2])
+power
+```
+```{r}
+#与疾病2有关
+Z_est_2 <- assoc(z2_post, 0.1)
+sum(Z_est_2)
+
+t<-table(Z_est_2, data$Z11+data$Z01)
+t
+
+FDP <- t[2, 1]/(t[2, 1] + t[2, 2])
+FDP
+
+power<-t[2,2]/(t[1,2]+t[2,2])
+power
+```
+
+
+```{r}
+# 重复20次，记录pi00_est,pi01_est,pi10_est,pi11_est,alpha1_est, alpha2_est, FDP, power，画出boxplot
+rep <- 20
+pi00_est <- pi01_est <-pi10_est <- pi11_est <- alpha1_est <- alpha2_est <- Z11_FDP <- Z1_FDP <- Z2_FDP <- Z11_power <- Z1_power <- Z2_power <- numeric(rep)
+for (i in 1:rep) {
+  set.seed(i)
+  data <- data_generate1(M,0.7,0.1,0.15,0.05,0.2,0.2)
+  theta_est <- EM1(data$P1,data$P2,pi00_ini=0.6,pi01_ini=0.05,pi10_ini=0.15,pi11_ini=0.01,alpha1_ini=0.2,alpha2_ini=0.1)
+  pi00_est[i] <- theta_est$pi00
+  pi01_est[i] <- theta_est$pi01
+  pi10_est[i] <- theta_est$pi10
+  pi11_est[i] <- theta_est$pi11
+  alpha1_est[i] <- theta_est$alpha1
+  alpha2_est[i] <- theta_est$alpha2
+  gamma_post <- theta_est$pi00+theta_est$pi01*theta_est$alpha2*data$P2^(theta_est$alpha2-1)+theta_est$alpha1*data$P1^(theta_est$alpha1-1)*theta_est$pi10+theta_est$pi11*theta_est$alpha1*theta_est$alpha2*data$P1^(theta_est$alpha1-1)*data$P2^(theta_est$alpha2-1)
+  z11_post <- theta_est$pi11*theta_est$alpha1*theta_est$alpha2*data$P1^(theta_est$alpha1-1)*data$P2^(theta_est$alpha2-1)/gamma_post
+  z01_post <- theta_est$pi01*theta_est$alpha2*data$P2^(theta_est$alpha2-1)/gamma_post
+  z10_post <- theta_est$alpha1*data$P1^(theta_est$alpha1-1)*theta_est$pi10/gamma_post
+  z00_post <- theta_est$pi00/gamma_post
+  z1_post <- z11_post+z10_post
+  z2_post <- z11_post+z01_post
+  Z_est_11 <- assoc(z11_post, 0.1)
+  t11<-table(Z_est_11, data$Z11)
+  Z11_FDP[i] <- t11[2, 1]/(t11[2, 1] + t11[2, 2])
+  Z11_power[i] <-t11[2,2]/(t11[1,2]+t11[2,2])
+  Z_est_1 <- assoc(z1_post, 0.1)
+  t1<-table(Z_est_1, data$Z11+data$Z10)
+  Z1_FDP[i] <- t1[2, 1]/(t1[2, 1] + t1[2, 2])
+  Z1_power[i] <-t1[2,2]/(t1[1,2]+t1[2,2])
+  Z_est_2 <- assoc(z2_post, 0.1)
+  t2<-table(Z_est_2, data$Z11+data$Z01)
+  Z2_FDP[i] <- t2[2, 1]/(t2[2, 1] + t2[2, 2])
+  Z2_power[i] <-t2[2,2]/(t2[1,2]+t2[2,2])
+}
+```
+
+```{r}
+boxplot(pi00_est,ylim=c(0.693,0.706))
+title("pi00_est")
+abline(h=0.7,col="red")
+```
+```{r}
+boxplot(pi01_est)
+title("pi01_est")
+abline(h=0.1,col="red")
+```
+```{r}
+boxplot(pi10_est)
+title("pi10_est")
+abline(h=0.15,col="red")
+```
+```{r}
+boxplot(pi11_est)
+title("pi11_est")
+abline(h=0.05,col="red")
+```
+```{r}
+boxplot(alpha1_est)
+title("alpha1_est")
+abline(h=0.2,col="red")
+```
+```{r}
+boxplot(alpha2_est)
+title("alpha2_est")
+abline(h=0.2,col="red")
+```
+
+
+```{r}
+boxplot(Z11_FDP)
+title("Z11_FDP")
+abline(h=0.1,col="red")
+```
+```{r}
+boxplot(Z1_FDP)
+title("Z1_FDP")
+abline(h=0.1,col="red")
+```
+```{r}
+boxplot(Z2_FDP)
+title("Z2_FDP")
+abline(h=0.1,col="red")
+```
+```{r}
+boxplot(Z11_power)
+title("Z11_power")
+```
+```{r}
+boxplot(Z1_power)
+title("Z1_power")
+```
+```{r}
+boxplot(Z2_power)
+title("Z2_power")
+```
+```{r}
+## 定义计算对数似然的函数
+# 对数似然函数log_P的输入为P和参数pi1，alpha
+
+log_X <- function(P, pi1, alpha){
+  return(sum(log(pi1*alpha*(P^(alpha-1))+1-pi1)))
+}
+
+## 定义实现EM算法的函数
+# EM函数的输入为P, pi1_ini, alpha_ini, max_iter, tol，输出为pi1_est, alpha_est
+EM <- function(P, pi1_ini, alpha_ini, max_iter=10000, tol=1e-6){
+
+  L_ini <- log_X(P, pi1_ini, alpha_ini) # 初始对数似然
+
+## 迭代
+# 设置最大迭代次数max_iter=10000
+## 每一次迭代中进行E步、M步、计算对数似然、判断算法是否收敛
+  max_iter <- 10000 # 设置最大迭代次数  #防止一直不收敛
+  for (iter in 1:max_iter){
+    if (iter == 1){
+      pi1_old <- pi1_ini
+      alpha_old <- alpha_ini
+      L_old <- L_ini
+    }
+## E步
+    comp_gamma <- pi1_old*dbeta(P, alpha_old, 1)
+    gamma <- comp_gamma/(comp_gamma + (1 - pi1_old)*dunif(P, 0, 1))
+## M步
+    pi1_new <- mean(gamma)
+    alpha_new <- -sum(gamma)/sum(gamma*log(P))
+## 计算对数似然
+    L_new <- log_X(P, pi1_new, alpha_new)
+## 判断算法是否收敛
+    if (L_new < L_old){
+      print("Error: log likelihoood is not increasing!")
+      break
+    }
+    if ((L_new - L_old)/abs(L_new) < tol){
+      pi1_est <- pi1_new
+      alpha_est <- alpha_new
+      break
+    } 
+    else {
+      pi1_old <- pi1_new
+      alpha_old <- alpha_new
+      L_old <- L_new
+    }
+  }
+   return(list(pi1 = pi1_new, alpha = alpha_new))
+}
+
+rep <- 20
+FDP1 <- numeric(rep)
+power1 <- numeric(rep)
+FDP2 <- numeric(rep)
+power2 <- numeric(rep)
+pi1_est <- numeric(rep)
+pi2_est <- numeric(rep)
+alpha1_est <- numeric(rep)
+alpha2_est <- numeric(rep)
+
+rep=20
+for (i in 1:rep){
+ set.seed(i)
+ data <- data_generate1(M,0.7,0.1,0.15,0.05,0.2,0.2)
+ est1 <- EM(data$P1, 0.1, 0.1)
+ est2 <- EM(data$P2, 0.1, 0.1)
+ 
+ pi1_est[i] <- est1$pi1
+ alpha1_est[i] <- est1$alpha
+ pi2_est[i] <- est2$pi1
+ alpha2_est[i] <- est2$alpha
+ 
+ posterior1 <- (est1$pi1*est1$alpha*data$P1^(est1$alpha - 1))/(est1$pi1*est1$alpha*data$P1^(est1$alpha - 1) + 1 - est1$pi1)
+ posterior2 <- (est2$pi1*est2$alpha*data$P2^(est2$alpha - 1))/(est2$pi1*est2$alpha*data$P2^(est2$alpha - 1) + 1 - est2$pi1)
+ 
+ Z_est1 <- assoc(posterior1, 0.1)
+ Z_est2 <- assoc(posterior2, 0.1)
+ t1 <- table(Z_est1, data$Z11+data$Z10)
+ t2 <- table(Z_est2, data$Z11+data$Z01)
+ 
+ FDP1[i] <- t1[2, 1]/(t1[2, 1] + t1[2, 2])
+ power1[i] <- t1[2, 2]/(t1[1, 2] + t1[2, 2])
+ FDP2[i] <- t2[2, 1]/(t2[2, 1] + t2[2, 2])
+ power2[i] <- t2[2, 2]/(t2[1, 2] + t2[2, 2])
+}
+
+```
+```{r}
+boxplot(pi1_est)
+title("pi1_est")
+abline(h=0.2,col="red")
+
+boxplot(pi2_est)
+title("pi2_est")
+abline(h=0.15,col="red")
+```
+
+
+
+```{r}
+boxplot(alpha1_est)
+title("alpha1_est")
+abline(h=0.2,col="red")
+
+boxplot(alpha2_est)
+title("alpha2_est")
+abline(h=0.2,col="red")
+```
+
+
+
+
+```{r}
+FDP_SUM <- cbind(FDP1,FDP2)
+boxplot(FDP_SUM)
+title("FDP")
+abline(h=0.1,col="red")
+```
+```{r}
+power_SUM <- cbind(Z1_power,Z2_power,power1,power2)
+boxplot(power_SUM)
+title("power")
+```
+```{r}
+#保持pi11和pi01不变，改变pi00和pi10
+pi00 <- c(0.5,0.55,0.6)
+pi10 <- rep(c(0.15,0.1,0.05),each=5 )
+rep=5
+pi00_est <- pi01_est <- pi10_est <- pi11_est <- alpha1_est <- alpha2_est <- Z11_FDP <-Z1_FDP <- Z2_FDP <- Z11_power <- Z1_power <- Z2_power <- data.frame(pi00 = rep(pi00,each=rep),value=numeric(length(pi00)*rep))
+for (i in 1:(length(pi00)*rep)){
+  set.seed(i)
+  data <- data_generate1(100000,pi00_est$pi00[i],0.2,pi10[i],0.15,0.2,0.2)
+  theta_est <- EM1(data$P1,data$P2,pi00_ini=0.5,pi01_ini=0.1,pi10_ini=0.1,pi11_ini=0.1,alpha1_ini=0.1,alpha2_ini=0.1)
+  pi00_est$value[i] <- theta_est$pi00
+  pi01_est$value[i] <- theta_est$pi01
+  pi10_est$value[i] <- theta_est$pi10
+  pi11_est$value[i] <- theta_est$pi11
+  alpha1_est$value[i] <- theta_est$alpha1  
+  alpha2_est$value[i] <- theta_est$alpha2
+   gamma_post <- theta_est$pi00+theta_est$pi01*theta_est$alpha2*data$P2^(theta_est$alpha2-1)+theta_est$alpha1*data$P1^(theta_est$alpha1-1)*theta_est$pi10+theta_est$pi11*theta_est$alpha1*theta_est$alpha2*data$P1^(theta_est$alpha1-1)*data$P2^(theta_est$alpha2-1)
+  z11_post <- theta_est$pi11*theta_est$alpha1*theta_est$alpha2*data$P1^(theta_est$alpha1-1)*data$P2^(theta_est$alpha2-1)/gamma_post
+  z01_post <- theta_est$pi01*theta_est$alpha2*data$P2^(theta_est$alpha2-1)/gamma_post
+  z10_post <- theta_est$alpha1*data$P1^(theta_est$alpha1-1)*theta_est$pi10/gamma_post
+  z00_post <- theta_est$pi00/gamma_post
+  z1_post <- z11_post+z10_post
+  z2_post <- z11_post+z01_post
+  Z_est_11 <- assoc(z11_post, 0.1)
+  t11<-table(Z_est_11, data$Z11)
+  Z11_FDP$value[i] <- t11[2, 1]/(t11[2, 1] + t11[2, 2])
+  Z11_power$value[i] <-t11[2,2]/(t11[1,2]+t11[2,2])
+  Z_est_1 <- assoc(z1_post, 0.1)
+  t1<-table(Z_est_1, data$Z11+data$Z10)
+  Z1_FDP$value[i] <- t1[2, 1]/(t1[2, 1] + t1[2, 2])
+  Z1_power$value[i] <-t1[2,2]/(t1[1,2]+t1[2,2])
+  Z_est_2 <- assoc(z2_post, 0.1)
+  t2<-table(Z_est_2, data$Z11+data$Z01)
+  Z2_FDP$value[i] <- t2[2, 1]/(t2[2, 1] + t2[2, 2])
+  Z2_power$value[i] <-t2[2,2]/(t2[1,2]+t2[2,2])
+}
+```
+
+```{r}
+library(ggplot2)
+pi00_est$pi00 <- as.factor(pi00_est$pi00)
+ggplot(pi00_est,aes(y=value,x=pi00,color=pi00))+geom_boxplot()+geom_hline(yintercept = pi00,linetype="dashed",color="red")+ggtitle("pi00_est")
+```
+
+```{r}
+library(ggplot2)
+pi01_est$pi00 <- as.factor(pi01_est$pi00)
+ggplot(pi01_est,aes(y=value,x=pi00,color=pi00))+geom_boxplot()+geom_hline(yintercept = 0.2,linetype="dashed",color="red")+ggtitle("pi01_est")
+```
+
+```{r}
+library(ggplot2)
+pi10_est$pi00 <- as.factor(pi10_est$pi00)
+ggplot(pi10_est,aes(y=value,x=pi00,color=pi00))+geom_boxplot()+geom_hline(yintercept = c(0.15,0.1,0.05),linetype="dashed",color="red")+ggtitle("pi10_est")
+```
+
+```{r}
+library(ggplot2)
+pi11_est$pi00 <- as.factor(pi11_est$pi00)
+ggplot(pi11_est,aes(y=value,x=pi00,color=pi00))+geom_boxplot()+geom_hline(yintercept = 0.15,linetype="dashed",color="red")+ggtitle("pi11_est")
+```
+
+```{r}
+library(ggplot2)
+alpha1_est$pi00 <- as.factor(alpha1_est$pi00)
+ggplot(alpha1_est,aes(y=value,x=pi00,color=pi00))+geom_boxplot()+geom_hline(yintercept = 0.2,linetype="dashed",color="red")+ggtitle("alpha1_est")
+```
+
+```{r}
+library(ggplot2)
+alpha2_est$pi00 <- as.factor(alpha2_est$pi00)
+ggplot(alpha2_est,aes(y=value,x=pi00,color=pi00))+geom_boxplot()+geom_hline(yintercept = 0.2,linetype="dashed",color="red")+ggtitle("alpha2_est")
+```
+
+```{r}
+library(ggplot2)
+Z1_power$pi00 <- as.factor(Z1_power$pi00)
+ggplot(Z1_power,aes(y=value,x=pi00,color=pi00))+geom_boxplot()+ggtitle("Z1_power")
+```
+
+```{r}
+library(ggplot2)
+Z2_power$pi00 <- as.factor(Z2_power$pi00)
+ggplot(Z2_power,aes(y=value,x=pi00,color=pi00))+geom_boxplot()+ggtitle("Z2_power")
+```
+
+```{r}
+library(ggplot2)
+Z11_power$pi00 <- as.factor(Z11_power$pi00)
+ggplot(Z11_power,aes(y=value,x=pi00,color=pi00))+geom_boxplot()+ggtitle("Z11_power")
+```
+
+
+# 真实数据
+```{r}
+BIP <- read.table("pgc.bip.full.2012-04.txt", header = T)
+```
+```{r}
+SCZ <- read.table("pgc.scz.full.2012-04.txt", header = T)
+```
+```{r}
+library(dplyr)
+```
+```{r}
+#取交集
+snp_result=intersect(BIP$snpid,SCZ$snpid)
+pvalue_bip <- BIP[BIP$snpid %in% snp_result,]$pval
+pvalue_scz <- SCZ[SCZ$snpid %in% snp_result,]$pval
+BIP_jiaoji <- BIP[BIP$snpid %in% snp_result,]
+SCZ_jiaoji <- SCZ[SCZ$snpid %in% snp_result,]
+BIP_SCZ <- inner_join(BIP[,c('snpid','pval')],SCZ[,c('snpid','pval')],by="snpid")
+```
+
+
+
+```{r}
+# 使用EM算法得到参数估计
+theta_est <- EM1(pvalue_bip, pvalue_scz,pi00_ini = 0.8, pi01_ini=0.01,pi10_ini=0.01,pi11_ini=0.1,alpha1_ini=0.2,alpha2_ini=0.2)
+theta_est 
+```
+
+
+
+```{r}
+gamma_post <- theta_est$pi00+theta_est$pi01*theta_est$alpha2*pvalue_scz^(theta_est$alpha2-1)+theta_est$alpha1*pvalue_bip^(theta_est$alpha1-1)*theta_est$pi10+theta_est$pi11*theta_est$alpha1*theta_est$alpha2*pvalue_bip^(theta_est$alpha1-1)*pvalue_scz^(theta_est$alpha2-1)
+```
+
+
+```{r}
+z11_post <- theta_est$pi11*theta_est$alpha1*theta_est$alpha2*pvalue_bip^(theta_est$alpha1-1)*pvalue_scz^(theta_est$alpha2-1)/gamma_post
+z01_post <- theta_est$pi01*theta_est$alpha2*pvalue_scz^(theta_est$alpha2-1)/gamma_post
+z10_post <- theta_est$alpha1*pvalue_bip^(theta_est$alpha1-1)*theta_est$pi10/gamma_post
+z00_post <- theta_est$pi00/gamma_post
+z1_post <- z11_post+z10_post
+z2_post <- z11_post+z01_post
+```
+
+
+```{r}
+# 与两种疾病均有关的SNP
+Z_est_11 <- assoc(z11_post, 0.1)
+sum(Z_est_11)
+
+# 与躁郁症（BIP)有关的SNP
+Z_est_10 <- assoc(z1_post, 0.1)
+sum(Z_est_10)
+
+# 与精神分裂症(SCZ)有关的SNP
+Z_est_01 <- assoc(z2_post, 0.1)
+sum(Z_est_01)
+
+```
+## 判断三类SNP的ID的重合性
+```{r}
+snpid_bip <- BIP[BIP$snpid %in% snp_result,]$snpid
+snp_bip = data.frame(snpid_bip = snpid_bip,bip_11 = Z_est_11,bip_10 = Z_est_10)
+snpid_bip_11 <- snp_bip[which(snp_bip$bip_11 == 1),'snpid_bip']
+snpid_bip_10 <- snp_bip[which(snp_bip$bip_10 == 1),'snpid_bip']
+```
+
+```{r}
+length(intersect(snpid_bip_11,snpid_bip_10))# 两类疾病都相关的和与BIP相关的高度重合
+```
+```{r}
+setdiff(snpid_bip_10,snpid_bip_11)# 与BIP相关而与SCZ不相关的唯一一个SNP
+```
+
+```{r}
+snpid_scz <- SCZ[SCZ$snpid %in% snp_result,]$snpid
+snp_scz = data.frame(snpid_scz = snpid_scz,scz_11 = Z_est_11,scz_10 = Z_est_01)
+snpid_scz_11 <- snp_scz[which(snp_scz$scz_11 == 1),'snpid_scz']
+snpid_scz_01 <- snp_scz[which(snp_scz$scz_10 == 1),'snpid_scz']
+```
+
+```{r}
+length(intersect(snpid_scz_11,snpid_scz_01))
+```
+
+
+# 只使用躁郁症GWAS数据分析
+```{r}
+## 定义计算对数似然的函数
+# 对数似然函数log_P的输入为P和参数pi1，alpha
+log_P_single <- function(P, pi1, alpha){
+  return(sum(log(pi1*dbeta(P, alpha, 1) + (1 - pi1))))# 最终要优化的函数
+}
+## 定义实现单个数据集分析的EM算法的函数
+# EM函数的输入为P, pi1_ini, alpha_ini, max_iter, tol，输出为pi1_est, alpha_est
+EM_single <- function(P, pi1_ini, alpha_ini, max_iter = 1e4, tol = 1e-6){
+ L_ini <- log_P_single(P, pi1_ini, alpha_ini)
+ for (iter in 1:max_iter){
+   if (iter == 1){
+     pi1_old <- pi1_ini
+     alpha_old <- alpha_ini
+     L_old <- L_ini
+   }
+ 
+   # E步
+   comp_gamma <- pi1_old*dbeta(P, alpha_old, 1)
+   gamma <- comp_gamma/(comp_gamma + 1 - pi1_old)
+   
+   # M步
+   pi1_new <- mean(gamma)
+   alpha_new <- -sum(gamma)/sum(gamma*log(P))
+   L_new <- log_P_single(P, pi1_new, alpha_new)
+   # 判断算法是否收敛
+   if (L_new < L_old){
+     print("Error: log likelihoood is not increasing!")
+     break
+   }
+   if ((L_new - L_old)/abs(L_new) < tol){
+     break
+   } else {
+     pi1_old <- pi1_new
+     alpha_old <- alpha_new
+     L_old <- L_new
+   }
+ }
+ 
+ return(list(pi1 = pi1_new, alpha = alpha_new))
+}
+```
+
+```{r}
+theta_est_BIP <- EM_single(pvalue_bip, pi1_ini = 0.1, alpha_ini = 0.2)
+theta_est_BIP
+```
+```{r}
+posterior_bip <- (theta_est_BIP$pi1*theta_est_BIP$alpha*pvalue_bip^(theta_est_BIP$alpha - 1))/(theta_est_BIP$pi1*theta_est_BIP$alpha*pvalue_bip^(theta_est_BIP$alpha - 1) + 1 - theta_est_BIP$pi1)
+Z_est_bip <- assoc(posterior_bip, 0.1)
+sum(Z_est_bip)
+```
+```{r}
+snp_bip_single = data.frame(snpid_bip = snpid_bip,bip_1 = Z_est_bip)
+snpid_bip_1 <- snp_bip_single[which(snp_bip_single$bip_1 == 1),'snpid_bip']
+```
+```{r}
+length(intersect(snpid_bip_1,snpid_bip_10))
+```
+
+# 只使用精神分裂症GWAS数据分析
+```{r}
+theta_est_SCZ <- EM_single(pvalue_scz, pi1_ini = 0.1, alpha_ini = 0.2)
+theta_est_SCZ
+```
+```{r}
+posterior_scz <- (theta_est_SCZ$pi1*theta_est_SCZ$alpha*pvalue_scz^(theta_est_SCZ$alpha - 1))/(theta_est_SCZ$pi1*theta_est_SCZ$alpha*pvalue_scz^(theta_est_SCZ$alpha - 1) + 1 - theta_est_SCZ$pi1)
+Z_est_scz <- assoc(posterior_scz, 0.1)
+sum(Z_est_scz)
+```
+```{r}
+snp_scz_single = data.frame(snpid_scz = snpid_scz,scz_1 = Z_est_scz)
+snpid_scz_1 <- snp_scz_single[which(snp_scz_single$scz_1 == 1),'snpid_scz']
+```
+
+```{r}
+length(intersect(snpid_scz_1,snpid_scz_01))
+```
+
+画曼哈顿图
+
+```{r}
+FDR <- function(posterior, alpha){
+  M          <- length(posterior)
+  fdr        <- 1 - posterior
+  rank.fdr   <- rank(fdr)
+  sort.fdr   <- sort(fdr)
+  cumsum.fdr <- cumsum(sort.fdr)
+  sort.FDR   <- cumsum.fdr/seq(1, M, 1)
+  FDR        <- sort.FDR[rank.fdr]
+
+  return(FDR)
+}
+```
+
+
+BIP
+```{r}
+library(qqman)
+SNP_BIP_snp <- as.vector(BIP$snpid[which(Z_est_bip == 1)])
+BIP_jiaoji$fdr <- -log10(FDR(posterior_bip, 0.1))
+manhattan(BIP_jiaoji, chr = "hg18chr", bp = "bp", p = "fdr", snp = "snpid", ylim = c(0, 3), col = c("blue4", "orange3"), cex = 0.6,logp = F,ylab = "-log_10(fdr)",
+          main = "single BIP",
+          suggestiveline = T, 
+          genomewideline = F)
+```
+SCZ
+```{r}
+SNP_SCZ_snp <- as.vector(BIP$snpid[which(Z_est_scz == 1)])
+SCZ_jiaoji$fdr <- -log10(assoc(posterior_scz, 0.1)$fdr)
+manhattan(SCZ_jiaoji, chr = "hg18chr", bp = "bp", p = "fdr", snp = "snpid", ylim = c(0, 3), col = c("blue4", "orange3"), cex = 0.6,logp = F,ylab = "-log_10(fdr)",
+          main = "single SCZ",
+          suggestiveline = T, 
+          genomewideline = F)
+```
+
+
+
+联合分析：BIP
+```{r}
+SNP_BIP_with_SCZ <- as.vector(BIP_jiaoji$snpid[which(Z_est_10 == 1)])
+BIP_jiaoji$fdr1 <- -log10(assoc(z1_post, 0.1)$fdr)
+manhattan(BIP_jiaoji, chr = "hg18chr", bp = "bp", p = "fdr1", snp = "snpid", ylim = c(0, 4), col = c("blue4", "orange3"), cex = 0.6,logp = F,ylab = "-log_10(fdr)",
+          main = "BIP with SCZ",
+          suggestiveline = T, 
+          genomewideline = F)
+```
+
+联合分析：SCZ
+```{r}
+SNP_SCZ_with_BIP <- as.vector(SCZ_jiaoji$snpid[which(Z_est_01 == 1)])
+SCZ_jiaoji$fdr1 <- -log10(assoc(z2_post, 0.1)$fdr)
+manhattan(SCZ_jiaoji, chr = "hg18chr", bp = "bp", p = "fdr1", snp = "snpid", ylim = c(0, 4), col = c("blue4", "orange3"), cex = 0.6,logp = F,ylab = "-log_10(fdr)",
+          main = "SCZ with BIP",
+          suggestiveline = T, 
+          genomewideline = F)
+```
+
+拓展：GPA
+```{r}
+install.packages("devtools")
+library(devtools)
+install_github("dongjunchung/GPA")
+```
+
+
+```{r}
+library(GPA)
+```
+
+```{r}
+fit.GPA.noAnn <- GPA( BIP_SCZ[ , c(2,3) ], NULL )
+fit.GPA.noAnn
+estimates( fit.GPA.noAnn )
+```
+
+
+```{r}
+assoc.GPA.noAnn <- GPA::assoc( fit.GPA.noAnn, FDR=0.10, fdrControl="global" )
+table(assoc.GPA.noAnn[,1])#BIP
+table(assoc.GPA.noAnn[,2])#SCZ
+#table(assoc.GPA.noAnn)
+```
+
+```{r}
+#与SCZ和BIP相关
+assoc11.GPA.noAnn <- GPA::assoc( fit.GPA.noAnn, FDR=0.10, fdrControl="global", pattern="11" )
+table(assoc11.GPA.noAnn)
+```
+
+```{r}
+#检验多效性
+ fit.GPA.pleiotropy.H0 <- GPA( BIP_SCZ[ , c(2,3) ], NULL, pleiotropyH0=TRUE )
+fit.GPA.pleiotropy.H0
+```
+
+
+```{r}
+test.GPA.pleiotropy <- pTest( fit.GPA.noAnn, fit.GPA.pleiotropy.H0 )
+test.GPA.pleiotropy
+```
+
