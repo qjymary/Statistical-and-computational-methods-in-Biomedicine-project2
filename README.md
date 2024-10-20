@@ -5,4 +5,4 @@ Conducted an integrative analysis of datasets for bipolar disorder and schizophr
 
 Explored the GPA (Genetic and Annotation Integration) model to enhance the ability to identify risk variants.
 
-The R code with annotations is [here](https://github.com/qjymary/Statistical-and-computational-methods-in-Biomedicine-project2/blob/main/Statistical-and-Computational-Methods-in-Biomedicine-project2-20241019-R.html).
+The R code with annotations is [here](https://github.com/qjymary/qjymary.github.io/tree/master/images/Statistical-and-Computational-Methods-in-Biomedicine-project2-20241019-R.html).
